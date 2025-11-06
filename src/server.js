@@ -167,8 +167,8 @@ async function handleImageToTextRequest(req, res) {
           {
             role: 'user',
             content: [
-              { type: 'input_text', text: prompt },
-              { type: 'input_image', image_url: imageData }
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: imageData }
             ]
           }
         ]
