@@ -1,0 +1,16 @@
+{
+  "name": "qwentest",
+  "version": "1.0.0",
+  "description": "Simple web tool for interacting with Qwen LLM via DashScope API.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "keywords": [
+    "qwen",
+    "dashscope"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
