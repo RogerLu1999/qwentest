@@ -33,7 +33,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'OPTIONS' && url.pathname === '/api/chat') {
+  if (req.method === 'POST' && url.pathname === '/api/image-to-text') {
+    await handleImageToTextRequest(req, res);
+    return;
+  }
+
+  if (req.method === 'OPTIONS' && (url.pathname === '/api/chat' || url.pathname === '/api/image-to-text')) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -81,21 +86,7 @@ async function handleStaticAsset(requestPath, res) {
 }
 
 async function handleChatRequest(req, res) {
-  let rawBody = '';
-
-  req.on('data', chunk => {
-    rawBody += chunk;
-    if (rawBody.length > 1e6) {
-      req.socket.destroy();
-    }
-  });
-
-  req.on('error', error => {
-    console.error('Request stream error:', error);
-    sendJson(res, 400, { error: 'Invalid request stream.' });
-  });
-
-  req.on('end', async () => {
+  collectRequestBody(req, res, async rawBody => {
     try {
       const parsed = JSON.parse(rawBody || '{}');
       const prompt = typeof parsed.prompt === 'string' ? parsed.prompt.trim() : '';
@@ -147,6 +138,98 @@ async function handleChatRequest(req, res) {
       console.error('Error handling chat request:', error);
       sendJson(res, 500, { error: 'Failed to process request.' });
     }
+  });
+}
+
+async function handleImageToTextRequest(req, res) {
+  collectRequestBody(req, res, async rawBody => {
+    try {
+      const parsed = JSON.parse(rawBody || '{}');
+      const imageData = typeof parsed.imageData === 'string' ? parsed.imageData.trim() : '';
+      const prompt = typeof parsed.prompt === 'string' && parsed.prompt.trim()
+        ? parsed.prompt.trim()
+        : '请识别这张图片中的内容，并输出清晰的文字描述。';
+
+      if (!imageData) {
+        sendJson(res, 400, { error: 'Image data is required.' });
+        return;
+      }
+
+      const apiKey = process.env.DASHSCOPE_API_KEY;
+      if (!apiKey) {
+        sendJson(res, 500, { error: 'DASHSCOPE_API_KEY is not set on the server.' });
+        return;
+      }
+
+      const payload = {
+        model: 'qwen-vl-plus',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: prompt },
+              { type: 'input_image', image_url: imageData }
+            ]
+          }
+        ]
+      };
+
+      const response = await fetch(DASH_SCOPE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('DashScope error:', result);
+        sendJson(res, response.status, {
+          error: result?.error?.message || 'Failed to retrieve response from Qwen.'
+        });
+        return;
+      }
+
+      const messageContent = result?.choices?.[0]?.message?.content;
+      let textResponse = 'No response generated.';
+
+      if (Array.isArray(messageContent)) {
+        textResponse = messageContent
+          .filter(part => part?.type === 'output_text' && typeof part?.text === 'string')
+          .map(part => part.text)
+          .join('\n') || textResponse;
+      } else if (typeof messageContent === 'string') {
+        textResponse = messageContent;
+      }
+
+      sendJson(res, 200, { response: textResponse });
+    } catch (error) {
+      console.error('Error handling image-to-text request:', error);
+      sendJson(res, 500, { error: 'Failed to process image.' });
+    }
+  });
+}
+
+function collectRequestBody(req, res, onComplete) {
+  let rawBody = '';
+
+  req.on('data', chunk => {
+    rawBody += chunk;
+    if (rawBody.length > 15e6) {
+      req.socket.destroy();
+    }
+  });
+
+  req.on('error', error => {
+    console.error('Request stream error:', error);
+    sendJson(res, 400, { error: 'Invalid request stream.' });
+  });
+
+  req.on('end', () => {
+    onComplete(rawBody);
   });
 }
 
